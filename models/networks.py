@@ -433,6 +433,11 @@ class ResnetBlock(nn.Module):
         out = x + self.conv_block(x)  # add skip connections
         return out
 
+class UnetGenerator2(nn.Module):
+    """Create the Unet-based generator architecture as used in RetinaGAN (Table V) and RL-CycleGAN (Fig. 5)"""
+    def __init__(self, input_nc, output_nc, num_downs, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False):
+
+    pass
 
 class UnetGenerator(nn.Module):
     """Create a Unet-based generator"""
