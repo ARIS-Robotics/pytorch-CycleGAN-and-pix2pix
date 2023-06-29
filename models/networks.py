@@ -20,10 +20,11 @@ def get_norm_layer(norm_type='instance'):
     """Return a normalization layer
 
     Parameters:
-        norm_type (str) -- the name of the normalization layer: batch | instance | none
+        norm_type (str) -- the name of the normalization layer: batch | instance | spectral | none
 
     For BatchNorm, we use learnable affine parameters and track running statistics (mean/stddev).
     For InstanceNorm, we do not use learnable affine parameters. We do not track running statistics.
+    For spectral_norm, this isn't actually a nn.Module, so we just return the function itself with package defaults.
     """
     if norm_type == 'batch':
         norm_layer = functools.partial(nn.BatchNorm2d, affine=True, track_running_stats=True)
@@ -32,6 +33,8 @@ def get_norm_layer(norm_type='instance'):
     elif norm_type == 'none':
         def norm_layer(x):
             return Identity()
+    elif norm_type == "spectral":
+        norm_layer = spectral_norm
     else:
         raise NotImplementedError('normalization layer [%s] is not found' % norm_type)
     return norm_layer
