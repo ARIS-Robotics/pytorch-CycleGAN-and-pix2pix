@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import init
+import torch.nn.utils.spectral_norm as spectral_norm
 import functools
 from torch.optim import lr_scheduler
 
@@ -447,7 +448,7 @@ class CustomUnetSkipConnectionBlock(nn.Module):
     """
 
     def __init__(self, outer_nc, inner_nc, input_nc=None, kernel_size=4, down_stride=2, up_stride=2, up_nc_ratio=1, resize_up_input=None,
-                 submodule=None, outermost=False, innermost=False, norm_layer=nn.BatchNorm2d, use_dropout=False):
+                 submodule=None, outermost=False, innermost=False, norm_layer=spectral_norm, use_dropout=False):
         """Construct a Unet submodule with skip connections.
 
         Parameters:
@@ -465,7 +466,7 @@ class CustomUnetSkipConnectionBlock(nn.Module):
             norm_layer          -- normalization layer
             use_dropout (bool)  -- if use dropout layers.
         """
-        super(UnetSkipConnectionBlock, self).__init__()
+        super(CustomUnetSkipConnectionBlock, self).__init__()
         self.outermost = outermost
         if type(norm_layer) == functools.partial:
             use_bias = norm_layer.func == nn.InstanceNorm2d
