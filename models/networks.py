@@ -441,10 +441,43 @@ class ResnetBlock(nn.Module):
 
 class RetinaUnetGenerator(nn.Module):
     """Create the Unet-based generator architecture as used in RetinaGAN (Table V) and RL-CycleGAN (Fig. 5)"""
-    def __init__(self, input_nc, output_nc, num_downs, ngf=1024, norm_layer=nn.BatchNorm2d, use_dropout=False):
+    def __init__(self, input_nc, output_nc, ngf=1024, norm_layer=spectral_norm, use_dropout=False):
+        """Construct the Unet generator for RetinaGAN
+        Parameters:
+            input_nc (int)  -- the number of channels in input images
+            output_nc (int) -- the number of channels in output images
+            num_downs (int) -- the number of downsamplings in UNet. For example, # if |num_downs| == 7,
+                                image of size 128x128 will become of size 1x1 # at the bottleneck
+            ngf (int)       -- the number of filters in the INNERMOST conv layer
+            norm_layer      -- normalization layer
 
-        pass
+        We construct the U-Net from the innermost layer to the outermost layer.
+        It is a recursive process.
+        """        
+        super(RetinaUnetGenerator, self).__init__()
+        # construct unet structure
+        unet_block = CustomUnetSkipConnectionBlock(ngf, ngf, input_nc=None, kernel_size=3, down_stride=2, up_stride=1, resize_up_input=2, skip=True, submodule=None, norm_layer=norm_layer, innermost=True)  # innermost (layer 0)
+        unet_block = CustomUnetSkipConnectionBlock(ngf, ngf, input_nc=None, kernel_size=3, down_stride=2, up_stride=1, resize_up_input=2, skip=True, submodule=unet_block, use_dropout=use_dropout, norm_layer=norm_layer, drop_col_row1=True)  # layer 1
 
+        for layer in range(2,7):          # layers 2-5
+            outer_nc = int(ngf/(2**(layer)))
+            inner_nc = int(ngf/(layer-1))
+
+            #Tweak parameters depending on the layer
+            skip = True if layer in (2,3,4) else False
+            down_stride = 1 if layer == 6 else 2
+            drop_col_row1 = True if layer == 3 else False
+
+            unet_block = CustomUnetSkipConnectionBlock(outer_nc, inner_nc, input_nc=None, kernel_size=3, down_stride=down_stride, up_stride=1, resize_up_input=2,
+                                                        skip=skip, submodule=unet_block, use_dropout=use_dropout, norm_layer=norm_layer, drop_col_row1=drop_col_row1)
+        # 
+        unet_block = CustomUnetSkipConnectionBlock(outer_nc/2, inner_nc/2, input_nc=None, kernel_size=3, down_stride=1, up_stride=1, resize_up_input=2, skip=False, submodule=unet_block, use_dropout=use_dropout, norm_layer=norm_layer) #layer 6
+        self.model = CustomUnetSkipConnectionBlock(output_nc, inner_nc/2, input_nc=input_nc, outer_down_kernel_size=7, down_stride=2, up_stride=1,
+                                                    skip=False, submodule=unet_block, use_dropout=use_dropout, norm_layer=norm_layer, outermost=True) # outermost (layer 7)
+
+    def forward(self, input):
+        """Standard forward"""
+        return self.model(input)
 
 class CustomUnetSkipConnectionBlock(nn.Module):
     """A more customizable Unet submodule with skip connection, based on the UnetSkipConnectionBlock.
@@ -453,7 +486,7 @@ class CustomUnetSkipConnectionBlock(nn.Module):
     """
 
     def __init__(self, outer_nc, inner_nc, input_nc=None, kernel_size=4, down_stride=2, up_stride=1, resize_up_input=None,
-                 submodule=None, outermost=False, innermost=False, norm_func=spectral_norm, use_dropout=False, skip=True):
+                 submodule=None, outermost=False, innermost=False, norm_layer=nn.BatchNorm2d, use_dropout=False, skip=True, outer_down_kernel_size=7, drop_col_row1=False):
         """Construct a Unet submodule with skip connections.
 
         Parameters:
@@ -470,50 +503,70 @@ class CustomUnetSkipConnectionBlock(nn.Module):
             norm_func          -- normalization function applied to convolutions. Default is spectral norm
             use_dropout (bool)  -- if use dropout layers.
             skip (bool) -- if Unet submodule has skip connections at all. Assume that outermost does NOT have skip connections
+            outer_down_kernel_size (int) -- in the original paper, the kernel size of the outermost down convolutional layer is 7 instead of 3
+            drop_col_row1 (bool) -- drops the first column and row of the input to the skip connection, if there is one
         """
         super(CustomUnetSkipConnectionBlock, self).__init__()
         self.outermost = outermost
         self.skip = skip
-        if type(norm_func) == functools.partial:
-            use_bias = norm_func.func == nn.InstanceNorm2d
+        self.drop_col_row1 = drop_col_row1
+
+        if type(norm_layer) == functools.partial:
+            use_bias = norm_layer.func == nn.InstanceNorm2d
         else:
-            use_bias = norm_func == nn.InstanceNorm2d
-        #NOTE: norm_layer is now assumed to be a function, norm_func, not a nn.Module
+            use_bias = norm_layer == nn.InstanceNorm2d
         if input_nc is None:
-            input_nc = outer_nc
-        downconv = norm_func(nn.Conv2d(input_nc, inner_nc, kernel_size=kernel_size,
-                             stride=down_stride, padding=1, bias=use_bias))
+            input_nc = outer_nc   
+        #Activations and instance normalizations 
         downrelu = nn.LeakyReLU(0.2, True)
+        downnorm = norm_layer(inner_nc)
         uprelu = nn.ReLU(True)
+        upnorm = norm_layer(outer_nc)
 
         if outermost:
-            upconv = norm_func(nn.ConvTranspose2d(inner_nc, outer_nc,
+            downconv = spectral_norm(nn.Conv2d(input_nc, inner_nc, kernel_size=outer_down_kernel_size,
+                             stride=down_stride, padding=1, bias=use_bias))
+            upconv = spectral_norm(nn.ConvTranspose2d(inner_nc, outer_nc,
                                         kernel_size=kernel_size, stride=up_stride,
                                         padding=1))
             down = [downconv]
-            up = [uprelu, upconv, nn.Sigmoid()] #no resizing in the outermost unet layer
+            up = [uprelu, upconv, nn.Sigmoid()]
             model = down + [submodule] + up
-        
-        else:
+
+        elif innermost:
+            downconv = spectral_norm(nn.Conv2d(input_nc, inner_nc, kernel_size=kernel_size,
+                             stride=down_stride, padding=1, bias=use_bias))    
             upconv = nn.ConvTranspose2d(inner_nc, outer_nc,
                                         kernel_size=kernel_size, stride=up_stride,
                                         padding=1, bias=use_bias)
-            down = [downrelu, downconv]
+            down = [downrelu, downconv, downnorm]
 
             if resize_up_input is not None:
                 resize = nn.Upsample(scale_factor=resize_up_input, mode='nearest')
-                up = [uprelu, resize, upconv]
+                up = [uprelu, resize, upconv, upnorm]
             else:
-                up = [uprelu, upconv]
+                up = [uprelu, upconv, upnorm]
             
-            if innermost:
-                model = down + up
-            
+            model = down + up
+        
+        else: #intermediate submodule
+            downconv = spectral_norm(nn.Conv2d(input_nc, inner_nc, kernel_size=kernel_size,
+                             stride=down_stride, padding=1, bias=use_bias))    
+            upconv = nn.ConvTranspose2d(inner_nc, outer_nc,
+                                        kernel_size=kernel_size, stride=up_stride,
+                                        padding=1, bias=use_bias)
+            down = [downrelu, downconv, downnorm]
+
+            if resize_up_input is not None:
+                resize = nn.Upsample(scale_factor=resize_up_input, mode='nearest')
+                up = [uprelu, resize, upconv, upnorm]
             else:
-                if use_dropout:
-                    model = down + [submodule] + up + [nn.Dropout(0.5)]
-                else:
-                    model = down + [submodule] + up
+                up = [uprelu, upconv, upnorm]
+            
+            if use_dropout:
+                model = down + [submodule] + up + [nn.Dropout(0.5)]
+            else:
+                model = down + [submodule] + up
 
         self.model = nn.Sequential(*model)
 
@@ -521,6 +574,8 @@ class CustomUnetSkipConnectionBlock(nn.Module):
         if self.outermost or not self.skip:
             return self.model(x)
         else:   # add skip connections
+            if self.drop_col_row1:
+                return torch.cat([x[:,:,1:,1:], self.model(x)], 1) #if the output tensor is (N,C,H,W)
             return torch.cat([x, self.model(x)], 1)
 
 class UnetGenerator(nn.Module):
