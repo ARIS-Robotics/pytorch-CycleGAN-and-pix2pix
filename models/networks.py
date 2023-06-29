@@ -159,6 +159,8 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
         net = UnetGenerator(input_nc, output_nc, 7, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
     elif netG == 'unet_256':
         net = UnetGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+    elif netG == 'unet_retinaGAN': #TODO: complete condition for retinaGAN
+        net = RetinaUnetGenerator()
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % netG)
     return init_net(net, init_type, init_gain, gpu_ids)
@@ -437,7 +439,7 @@ class ResnetBlock(nn.Module):
         out = x + self.conv_block(x)  # add skip connections
         return out
 
-class RetinaGANGenerator(nn.Module):
+class RetinaUnetGenerator(nn.Module):
     """Create the Unet-based generator architecture as used in RetinaGAN (Table V) and RL-CycleGAN (Fig. 5)"""
     def __init__(self, input_nc, output_nc, num_downs, ngf=1024, norm_layer=nn.BatchNorm2d, use_dropout=False):
 
@@ -450,8 +452,8 @@ class CustomUnetSkipConnectionBlock(nn.Module):
         |-- downsampling -- |submodule| -- upsampling --|
     """
 
-    def __init__(self, outer_nc, inner_nc, input_nc=None, kernel_size=4, down_stride=2, up_stride=2, up_nc_ratio=1, resize_up_input=None,
-                 submodule=None, outermost=False, innermost=False, norm_layer=spectral_norm, use_dropout=False):
+    def __init__(self, outer_nc, inner_nc, input_nc=None, kernel_size=4, down_stride=2, up_stride=1, resize_up_input=None,
+                 submodule=None, outermost=False, innermost=False, norm_func=spectral_norm, use_dropout=False, skip=True):
         """Construct a Unet submodule with skip connections.
 
         Parameters:
@@ -461,59 +463,62 @@ class CustomUnetSkipConnectionBlock(nn.Module):
             kernel_size (int) -- the kernel size of the convolutional blocks in both the downsampling and upsampling
             down_stride (int) -- the stride for the convolutional block in the downsampling
             up_stride (int) -- the stride for the convolutional block in the upsampling
-            up_nc_ratio (float) -- multiplies the number of input and output channels by up_nc_ratio for the upsampling
             resize_up_input (int) -- if not None, scales the height and width of the input image/features to the upsampling convolution
             submodule (UnetSkipConnectionBlock) -- previously defined submodules
             outermost (bool)    -- if this module is the outermost module
             innermost (bool)    -- if this module is the innermost module
-            norm_layer          -- normalization layer
+            norm_func          -- normalization function applied to convolutions. Default is spectral norm
             use_dropout (bool)  -- if use dropout layers.
+            skip (bool) -- if Unet submodule has skip connections at all. Assume that outermost does NOT have skip connections
         """
         super(CustomUnetSkipConnectionBlock, self).__init__()
         self.outermost = outermost
-        if type(norm_layer) == functools.partial:
-            use_bias = norm_layer.func == nn.InstanceNorm2d
+        self.skip = skip
+        if type(norm_func) == functools.partial:
+            use_bias = norm_func.func == nn.InstanceNorm2d
         else:
-            use_bias = norm_layer == nn.InstanceNorm2d
+            use_bias = norm_func == nn.InstanceNorm2d
+        #NOTE: norm_layer is now assumed to be a function, norm_func, not a nn.Module
         if input_nc is None:
             input_nc = outer_nc
-        downconv = nn.Conv2d(input_nc, inner_nc, kernel_size=kernel_size,
-                             stride=down_stride, padding=1, bias=use_bias)
+        downconv = norm_func(nn.Conv2d(input_nc, inner_nc, kernel_size=kernel_size,
+                             stride=down_stride, padding=1, bias=use_bias))
         downrelu = nn.LeakyReLU(0.2, True)
-        downnorm = norm_layer(inner_nc)
         uprelu = nn.ReLU(True)
-        upnorm = norm_layer(outer_nc)
 
         if outermost:
-            upconv = nn.ConvTranspose2d(inner_nc * 2, outer_nc,
+            upconv = norm_func(nn.ConvTranspose2d(inner_nc, outer_nc,
                                         kernel_size=kernel_size, stride=up_stride,
-                                        padding=1)
+                                        padding=1))
             down = [downconv]
-            up = [uprelu, upconv, nn.Tanh()]
+            up = [uprelu, upconv, nn.Sigmoid()] #no resizing in the outermost unet layer
             model = down + [submodule] + up
-        elif innermost:
+        
+        else:
             upconv = nn.ConvTranspose2d(inner_nc, outer_nc,
-                                        kernel_size=kernel_size, stride=2,
+                                        kernel_size=kernel_size, stride=up_stride,
                                         padding=1, bias=use_bias)
             down = [downrelu, downconv]
-            up = [uprelu, upconv, upnorm]
-            model = down + up
-        else:
-            upconv = nn.ConvTranspose2d(inner_nc * 2, outer_nc,
-                                        kernel_size=kernel_size, stride=2,
-                                        padding=1, bias=use_bias)
-            down = [downrelu, downconv, downnorm]
-            up = [uprelu, upconv, upnorm]
 
-            if use_dropout:
-                model = down + [submodule] + up + [nn.Dropout(0.5)]
+            if resize_up_input is not None:
+                resize = nn.Upsample(scale_factor=resize_up_input, mode='nearest')
+                up = [uprelu, resize, upconv]
             else:
-                model = down + [submodule] + up
+                up = [uprelu, upconv]
+            
+            if innermost:
+                model = down + up
+            
+            else:
+                if use_dropout:
+                    model = down + [submodule] + up + [nn.Dropout(0.5)]
+                else:
+                    model = down + [submodule] + up
 
         self.model = nn.Sequential(*model)
 
     def forward(self, x):
-        if self.outermost:
+        if self.outermost or not self.skip:
             return self.model(x)
         else:   # add skip connections
             return torch.cat([x, self.model(x)], 1)
