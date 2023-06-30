@@ -458,10 +458,11 @@ class RetinaUnetGenerator(nn.Module):
         # construct unet structure
         unet_block = CustomUnetSkipConnectionBlock(ngf, ngf, input_nc=None, kernel_size=3, down_stride=2, up_stride=1, resize_up_input=2, skip=True, submodule=None, norm_layer=norm_layer, innermost=True)  # innermost (layer 0)
         unet_block = CustomUnetSkipConnectionBlock(ngf, ngf, input_nc=None, kernel_size=3, down_stride=2, up_stride=1, resize_up_input=2, skip=True, submodule=unet_block, use_dropout=use_dropout, norm_layer=norm_layer, drop_col_row1=True)  # layer 1
-
-        for layer in range(2,7):          # layers 2-5
-            outer_nc = int(ngf/(2**(layer)))
-            inner_nc = int(ngf/(layer-1))
+        power = 0
+        for layer in range(2,7):          # layers 2-6
+            outer_nc = int(ngf/(2**(power+1)))
+            inner_nc = int(ngf/(2**power))
+            power += 1
 
             #Tweak parameters depending on the layer
             skip = True if layer in (2,3,4) else False
@@ -471,7 +472,6 @@ class RetinaUnetGenerator(nn.Module):
             unet_block = CustomUnetSkipConnectionBlock(outer_nc, inner_nc, input_nc=None, kernel_size=3, down_stride=down_stride, up_stride=1, resize_up_input=2,
                                                         skip=skip, submodule=unet_block, use_dropout=use_dropout, norm_layer=norm_layer, drop_col_row1=drop_col_row1)
         # 
-        unet_block = CustomUnetSkipConnectionBlock(outer_nc/2, inner_nc/2, input_nc=None, kernel_size=3, down_stride=1, up_stride=1, resize_up_input=2, skip=False, submodule=unet_block, use_dropout=use_dropout, norm_layer=norm_layer) #layer 6
         self.model = CustomUnetSkipConnectionBlock(output_nc, inner_nc/2, input_nc=input_nc, outer_down_kernel_size=7, down_stride=2, up_stride=1,
                                                     skip=False, submodule=unet_block, use_dropout=use_dropout, norm_layer=norm_layer, outermost=True) # outermost (layer 7)
 
@@ -504,7 +504,7 @@ class CustomUnetSkipConnectionBlock(nn.Module):
             use_dropout (bool)  -- if use dropout layers.
             skip (bool) -- if Unet submodule has skip connections at all. Assume that outermost does NOT have skip connections
             outer_down_kernel_size (int) -- in the original paper, the kernel size of the outermost down convolutional layer is 7 instead of 3
-            drop_col_row1 (bool) -- drops the first column and row of the input to the skip connection, if there is one
+            drop_col_row1 (bool) -- drops the first column and row of the output of the upsampling before any concatenation with the downsampling, if skip connection exists
         """
         super(CustomUnetSkipConnectionBlock, self).__init__()
         self.outermost = outermost
@@ -517,7 +517,7 @@ class CustomUnetSkipConnectionBlock(nn.Module):
             use_bias = norm_layer == nn.InstanceNorm2d
         if input_nc is None:
             input_nc = outer_nc   
-        #Activations and instance normalizations 
+        #Activations and instance normalizations
         downrelu = nn.LeakyReLU(0.2, True)
         downnorm = norm_layer(inner_nc)
         uprelu = nn.ReLU(True)
@@ -575,7 +575,7 @@ class CustomUnetSkipConnectionBlock(nn.Module):
             return self.model(x)
         else:   # add skip connections
             if self.drop_col_row1:
-                return torch.cat([x[:,:,1:,1:], self.model(x)], 1) #if the output tensor is (N,C,H,W)
+                return torch.cat([x, self.model(x)[:,:,1:,1:]], 1) #if the output tensor is (N,C,H,W)
             return torch.cat([x, self.model(x)], 1)
 
 class UnetGenerator(nn.Module):
