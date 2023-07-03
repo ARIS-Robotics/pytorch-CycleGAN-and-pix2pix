@@ -145,6 +145,9 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
         Resnet-based generator consists of several Resnet blocks between a few downsampling/upsampling operations.
         We adapt Torch code from Justin Johnson's neural style transfer project (https://github.com/jcjohnson/fast-neural-style).
 
+        RetinaGAN: [unet_retinaGAN] (for 472 x 472 input images). Unet-based generator implementation for RetinaGAN
+        Based exactly from the original paper
+
 
     The generator has been initialized by <init_net>. It uses RELU for non-linearity.
     """
@@ -159,8 +162,8 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
         net = UnetGenerator(input_nc, output_nc, 7, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
     elif netG == 'unet_256':
         net = UnetGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
-    elif netG == 'unet_retinaGAN': #TODO: complete condition for retinaGAN
-        net = RetinaUnetGenerator()
+    elif netG == 'unet_retinaGAN':
+        net = RetinaUnetGenerator(input_nc, output_nc, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % netG)
     return init_net(net, init_type, init_gain, gpu_ids)
@@ -441,14 +444,12 @@ class ResnetBlock(nn.Module):
 
 class RetinaUnetGenerator(nn.Module):
     """Create the Unet-based generator architecture as used in RetinaGAN (Table V) and RL-CycleGAN (Fig. 5)"""
-    def __init__(self, input_nc, output_nc, ngf=1024, norm_layer=spectral_norm, use_dropout=False):
+    def __init__(self, input_nc, output_nc, ngf=1024, norm_layer=nn.InstanceNorm2d, use_dropout=False):
         """Construct the Unet generator for RetinaGAN
         Parameters:
             input_nc (int)  -- the number of channels in input images
             output_nc (int) -- the number of channels in output images
-            num_downs (int) -- the number of downsamplings in UNet. For example, # if |num_downs| == 7,
-                                image of size 128x128 will become of size 1x1 # at the bottleneck
-            ngf (int)       -- the number of filters in the INNERMOST conv layer
+            ngf (int)       -- the number of filters in the INNERMOST conv layer. Default 1024
             norm_layer      -- normalization layer
 
         We construct the U-Net from the innermost layer to the outermost layer.
