@@ -206,6 +206,7 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
         net = NLayerDiscriminator(input_nc, ndf, n_layers=3, norm_layer=norm_layer)
     elif netD == 'n_layers':  # more options
         net = NLayerDiscriminator(input_nc, ndf, n_layers_D, norm_layer=norm_layer)
+        #NOTE: For RetinaGAN, need a discriminator with 5 convolutional layers
     elif netD == 'pixel':     # classify if each pixel is real or fake
         net = PixelDiscriminator(input_nc, ndf, norm_layer=norm_layer)
     else:
@@ -727,6 +728,52 @@ class NLayerDiscriminator(nn.Module):
     def forward(self, input):
         """Standard forward."""
         return self.model(input)
+
+class RetinaGANDiscriminator(nn.Module):
+    """
+    Defines the discriminator architecture used in RetinaGAN (https://arxiv.org/pdf/2011.03148.pdf)
+    which is actually taken from this paper: https://arxiv.org/pdf/1709.07857.pdf 
+    """
+
+    def __init__(self, input_nc, norm_layer=nn.InstanceNorm2d):
+        """Construct the PatchGAN Discriminator used in RetinaGAN
+        
+        Parameters:
+            input_nc (int) -- the number of channels in input images
+            norm_layer -- normalization layer
+        """
+        super(RetinaGANDiscriminator, self).__init__()
+        if type(norm_layer) == functools.partial:  # no need to use bias as BatchNorm2d has affine parameters
+            use_bias = norm_layer.func == nn.InstanceNorm2d
+        else:
+            use_bias = norm_layer == nn.InstanceNorm2d
+        
+        kw = 4
+        padw = 1
+
+        sequence = [nn.Conv2d(input_nc, 64, kernel_size=kw, stride=2, padding=padw, bias=use_bias),
+                    nn.LeakyReLU(0.2, True),
+
+                    nn.Conv2d(64, 128, kernel_size=kw, stride=2, padding=padw, bias=use_bias),
+                    norm_layer(128),
+                    nn.LeakyReLU(0.2, True),
+                    
+                    nn.Conv2d(128, 256, kernel_size=kw, stride=2, padding=padw, bias=use_bias),
+                    norm_layer(256),
+                    nn.LeakyReLU(0.2, True),
+                    
+                    nn.Conv2d(256, 256, kernel_size=kw, stride=2, padding=padw, bias=use_bias),
+                    norm_layer(256),
+                    nn.LeakyReLU(0.2, True),
+                    
+                    nn.Conv2d(256, 1, kernel_size=kw, stride=1, padding=padw),
+                    ] #NOTE: sigmoid activation handled in vannilla gan loss (BCEWithLogitsLoss)
+        self.model = nn.Sequential(*sequence)
+
+    def forward(self, input):
+        """Standard forward."""
+        return self.model(input)     
+
 
 
 class PixelDiscriminator(nn.Module):
