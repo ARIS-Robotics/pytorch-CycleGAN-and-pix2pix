@@ -266,7 +266,7 @@ class GANLoss(nn.Module):
         return target_tensor.expand_as(prediction)
 
     def __call__(self, prediction, target_is_real):
-        """Calculate loss given Discriminator's output and grount truth labels.
+        """Calculate loss given Discriminator's output and ground truth labels.
 
         Parameters:
             prediction (tensor) - - tpyically the prediction output from a discriminator
@@ -284,6 +284,46 @@ class GANLoss(nn.Module):
             else:
                 loss = prediction.mean()
         return loss
+
+class FCL(nn.Module):
+    """ Define Focal Consistency Loss (FCL) (https://arxiv.org/pdf/2011.03148.pdf)
+
+    FCL extends Focal Loss by supporting ground truth confidence probabilities [0,1] from binary {0,1} classification
+    """
+
+    def __init__(self):
+        """Initialize the FCL class
+        
+        Parameters:
+            
+        """
+
+
+class PerceptionConsistencyLoss(nn.Module):
+    """Define Perception Consistency Loss for penalizing discrepencies in object detections between translations
+    Source: https://arxiv.org/pdf/2011.03148.pdf
+
+    """
+
+    def __init__(self, box_loss, class_loss):
+        """
+        Initialize Perception Consistency Loss class
+
+        Parameters:
+            box_loss (str) -- the type of loss on the segmentation boxes. Supports 'huber'
+            class_loss (str) -- the type of loss on the class labels. Supports 'cross_entropy'
+        """
+        super(PerceptionConsistencyLoss, self).__init__()
+        if box_loss == "huber":
+            self.box_loss = nn.HuberLoss()
+        else:
+            raise NotImplementedError('box_loss %s not implemented' % box_loss)
+        
+        if class_loss == "cross_entropy":
+            self.class_loss = nn.CrossEntropyLoss()
+
+
+
 
 
 def cal_gradient_penalty(netD, real_data, fake_data, device, type='mixed', constant=1.0, lambda_gp=10.0):

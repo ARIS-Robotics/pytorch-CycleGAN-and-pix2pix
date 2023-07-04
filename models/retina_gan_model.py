@@ -2,15 +2,16 @@ import torch
 import itertools
 from util.image_pool import ImagePool
 from .base_model import BaseModel
+from .cycle_gan_model import CycleGANModel
 from . import networks
 
 
-class RetinaGANModel(BaseModel):
+class RetinaGANModel(CycleGANModel):
     """
     This class implements the RetinaGAN model, for learning image-to-image translation without paired data.
 
     The model training requires '--dataset_mode unaligned' dataset.
-    By default, it uses a '--netG resnet_9blocks' ResNet generator,
+    By default, it uses a '--netG unet_retinaGAN' UNet generator,
     a '--netD basic' discriminator (PatchGAN introduced by pix2pix),
     and a least-square GANs objective ('--gan_mode lsgan').
 
@@ -41,16 +42,18 @@ class RetinaGANModel(BaseModel):
             parser.add_argument('--lambda_A', type=float, default=10.0, help='weight for cycle loss (A -> B -> A)')
             parser.add_argument('--lambda_B', type=float, default=10.0, help='weight for cycle loss (B -> A -> B)')
             parser.add_argument('--lambda_identity', type=float, default=0.5, help='use identity mapping. Setting lambda_identity other than 0 has an effect of scaling the weight of the identity mapping loss. For example, if the weight of the identity loss should be 10 times smaller than the weight of the reconstruction loss, please set lambda_identity = 0.1')
-
+            parser.add_argument('--lambda_prcp', type=float, default=0.1, help='weight for perception consistency loss on the generators for object detection')
         return parser
 
     def __init__(self, opt):
-        """Initialize the CycleGAN class.
+        """Initialize the RetinaGAN class.
 
         Parameters:
             opt (Option class)-- stores all the experiment flags; needs to be a subclass of BaseOptions
         """
-        BaseModel.__init__(self, opt)
+        CycleGANModel.__init__(self, opt)
+
+        #TODO: Modify the code below to include options for the object detection
         # specify the training losses you want to print out. The training/test scripts will call <BaseModel.get_current_losses>
         self.loss_names = ['D_A', 'G_A', 'cycle_A', 'idt_A', 'D_B', 'G_B', 'cycle_B', 'idt_B']
         # specify the images you want to save/display. The training/test scripts will call <BaseModel.get_current_visuals>
