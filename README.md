@@ -1,4 +1,4 @@
-#This is a repository that aims to create RetinaGAN 
+# This fork aims to implement RetinaGAN using the style of this package
 <img src='imgs/horse2zebra.gif' align="right" width=384>
 
 <br><br><br>
