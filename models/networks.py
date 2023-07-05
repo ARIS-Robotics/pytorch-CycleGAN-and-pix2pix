@@ -175,7 +175,7 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
     Parameters:
         input_nc (int)     -- the number of channels in input images
         ndf (int)          -- the number of filters in the first conv layer
-        netD (str)         -- the architecture's name: basic | n_layers | pixel
+        netD (str)         -- the architecture's name: basic | n_layers | pixel | retinaGAN
         n_layers_D (int)   -- the number of conv layers in the discriminator; effective when netD=='n_layers'
         norm (str)         -- the type of normalization layers used in the network.
         init_type (str)    -- the name of the initialization method.
@@ -208,6 +208,8 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
         net = NLayerDiscriminator(input_nc, ndf, n_layers_D, norm_layer=norm_layer)
     elif netD == 'pixel':     # classify if each pixel is real or fake
         net = PixelDiscriminator(input_nc, ndf, norm_layer=norm_layer)
+    elif netD == 'retinaGAN':
+        net = RetinaGANDiscriminator(input_nc, ndf, norm_layer=norm_layer)
     else:
         raise NotImplementedError('Discriminator model name [%s] is not recognized' % netD)
     return init_net(net, init_type, init_gain, gpu_ids)
@@ -794,11 +796,13 @@ class RetinaGANDiscriminator(nn.Module):
     which is actually taken from this paper: https://arxiv.org/pdf/1709.07857.pdf 
     """
 
-    def __init__(self, input_nc, norm_layer=nn.InstanceNorm2d):
+    def __init__(self, input_nc, ndf=64, norm_layer=nn.InstanceNorm2d):
         """Construct the PatchGAN Discriminator used in RetinaGAN
         
         Parameters:
             input_nc (int) -- the number of channels in input images
+            ndf (int) -- the number of filters in the first convolutional layer. Must be 64.
+                         this variable is honestly just here to keep with the function signature style.
             norm_layer -- normalization layer
         """
         super(RetinaGANDiscriminator, self).__init__()
@@ -807,10 +811,12 @@ class RetinaGANDiscriminator(nn.Module):
         else:
             use_bias = norm_layer == nn.InstanceNorm2d
         
+        assert ndf == 64, "the number of channels in first conv layer must be 64"
+        
         kw = 4
         padw = 1
 
-        sequence = [nn.Conv2d(input_nc, 64, kernel_size=kw, stride=2, padding=padw, bias=use_bias),
+        sequence = [nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=2, padding=padw, bias=use_bias),
                     nn.LeakyReLU(0.2, True),
 
                     nn.Conv2d(64, 128, kernel_size=kw, stride=2, padding=padw, bias=use_bias),
