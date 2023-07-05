@@ -42,8 +42,8 @@ class RetinaGANModel(CycleGANModel):
             parser.add_argument('--lambda_A', type=float, default=10.0, help='weight for cycle loss (A -> B -> A)')
             parser.add_argument('--lambda_B', type=float, default=10.0, help='weight for cycle loss (B -> A -> B)')
             parser.add_argument('--lambda_prcp', type=float, default=0.1, help='weight for perception consistency loss on the generators for object detection')
-            parser.add_argument('--detection_model', type=str, default='mask_rcnn', help='name of object detection model')
-            parser.add_argument('--model_path', type=str, default='None', help='path to pre-trained object detection model')
+            parser.add_argument('--det_model', type=str, default='mask_rcnn', help='name of object detection model')
+            parser.add_argument('--det_model_path', type=str, default='None', help='path to pre-trained object detection model')
         return parser
 
     def __init__(self, opt):
@@ -80,6 +80,12 @@ class RetinaGANModel(CycleGANModel):
                                             opt.n_layers_D, opt.norm, opt.init_type, opt.init_gain, self.gpu_ids)
             self.netD_B = networks.define_D(opt.input_nc, opt.ndf, opt.netD,
                                             opt.n_layers_D, opt.norm, opt.init_type, opt.init_gain, self.gpu_ids)
+        ###########
+        # load and define detection model
+        self.opt.det_model
+        self.opt.det_model_path
+        ###########
+
 
         if self.isTrain:
             if opt.lambda_identity > 0.0:  # only works when input and output images have the same number of channels
