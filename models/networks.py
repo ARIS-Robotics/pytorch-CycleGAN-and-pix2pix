@@ -206,7 +206,6 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
         net = NLayerDiscriminator(input_nc, ndf, n_layers=3, norm_layer=norm_layer)
     elif netD == 'n_layers':  # more options
         net = NLayerDiscriminator(input_nc, ndf, n_layers_D, norm_layer=norm_layer)
-        #NOTE: For RetinaGAN, need a discriminator with 5 convolutional layers
     elif netD == 'pixel':     # classify if each pixel is real or fake
         net = PixelDiscriminator(input_nc, ndf, norm_layer=norm_layer)
     else:
@@ -303,15 +302,16 @@ class PerceptionConsistencyLoss(nn.Module):
     """Define Perception Consistency Loss for penalizing discrepencies in object detections between translations
     Source: https://arxiv.org/pdf/2011.03148.pdf
 
+    Given two differently-stylized images of the same scene, this loss enforces invariance in the scene content
     """
 
-    def __init__(self, box_loss, class_loss):
+    def __init__(self, box_loss="huber", class_loss="BCE"):
         """
         Initialize Perception Consistency Loss class
 
         Parameters:
-            box_loss (str) -- the type of loss on the segmentation boxes. Supports 'huber'
-            class_loss (str) -- the type of loss on the class labels. Supports 'cross_entropy'
+            box_loss (str) -- the type of regression loss on the segmentation boxes. Supports 'huber'
+            class_loss (str) -- the type of classification loss on the class labels. Supports 'cross_entropy'
         """
         super(PerceptionConsistencyLoss, self).__init__()
         if box_loss == "huber":
@@ -321,9 +321,28 @@ class PerceptionConsistencyLoss(nn.Module):
         
         if class_loss == "cross_entropy":
             self.class_loss = nn.CrossEntropyLoss()
+        elif class_loss == "BCE":
+            self.class_loss = nn.BCELoss()
+        elif class_loss == "FCL":
+            self.class_loss = FCL()
+        else:
+            raise NotImplementedError('class_loss %s not implemented' % class_loss)
+    
+    def __call__(self, box_x, box_g, class_x, class_g):
+        """
+        Calculate loss given the original image and the new generated image
 
-
-
+        Parameters:
+            box_x (FloatTensor[N,4]) -- the original image's predicted bounding boxes
+            box_g (FloatTensor[N,4]) -- the generated image's predicted bounding boxes
+            class_x (Int64Tensor[N]) -- the original image's predicted labels
+            class_g (Int64Tensor[N]) -- the generated image's predicted labels
+        
+        Returns:
+            the calculated loss
+        """
+        loss = self.box_loss(box_x, box_g) + self.class_loss(class_x, class_g)
+        return loss
 
 
 def cal_gradient_penalty(netD, real_data, fake_data, device, type='mixed', constant=1.0, lambda_gp=10.0):
