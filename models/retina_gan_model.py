@@ -54,7 +54,6 @@ class RetinaGANModel(CycleGANModel):
         """
         CycleGANModel.__init__(self, opt)
 
-        #TODO: Modify the code below to include options for the object detection model
         # specify the training losses you want to print out. The training/test scripts will call <BaseModel.get_current_losses>
         self.loss_names = ['D_A', 'G_A', 'cycle_A', 'D_B', 'G_B', 'cycle_B', 'prcp']
         # specify the images you want to save/display. The training/test scripts will call <BaseModel.get_current_visuals>
@@ -82,14 +81,22 @@ class RetinaGANModel(CycleGANModel):
                                             opt.n_layers_D, opt.norm, opt.init_type, opt.init_gain, self.gpu_ids)
         ###########
         # load and define detection model
-        self.opt.det_model
-        self.opt.det_model_path
+        if self.opt.det_model == 'mask_rcnn':
+            try:
+                from detection import MaskRCNN
+                self.det_model = MaskRCNN.load_from_checkpoint(self.opt.det_model_path)
+                self.det_model.to(self.opt.gpu_ids[0]) #TODO: should this model be set on a different id?
+                self.det_model.eval()
+            except ImportError as err:
+                print("Import error for dection package:", err)
+            except Exception as err:
+                print(f"Unexpected {err=}, {type(err)=}")
+                raise
+        else:
+            raise NotImplementedError('Model option [%s] is not implemented' % self.opt.det_model)
         ###########
 
-
         if self.isTrain:
-            if opt.lambda_identity > 0.0:  # only works when input and output images have the same number of channels
-                assert(opt.input_nc == opt.output_nc)
             self.fake_A_pool = ImagePool(opt.pool_size)  # create image buffer to store previously generated images
             self.fake_B_pool = ImagePool(opt.pool_size)  # create image buffer to store previously generated images
             # define loss functions
