@@ -42,6 +42,8 @@ class RetinaGANModel(CycleGANModel):
             parser.add_argument('--lambda_A', type=float, default=10.0, help='weight for cycle loss (A -> B -> A)')
             parser.add_argument('--lambda_B', type=float, default=10.0, help='weight for cycle loss (B -> A -> B)')
             parser.add_argument('--lambda_prcp', type=float, default=0.1, help='weight for perception consistency loss on the generators for object detection')
+            parser.add_argument('--prcp_box_loss', type=str, default='huber', help= 'regression loss on the segmentation boxes for Perception Consistency Loss')
+            parser.add_argument('--prcp_class_loss', type=str, default='BCE', help='classification loss on the class outputs for Perception Consistency Loss')
             parser.add_argument('--det_model', type=str, default='mask_rcnn', help='name of object detection model')
             parser.add_argument('--det_model_path', type=str, default='None', help='path to pre-trained object detection model')
         return parser
@@ -85,7 +87,7 @@ class RetinaGANModel(CycleGANModel):
             try:
                 from detection import MaskRCNN
                 self.det_model = MaskRCNN.load_from_checkpoint(self.opt.det_model_path)
-                self.det_model.to(self.opt.gpu_ids[0]) #TODO: should this model be set on a different id?
+                self.det_model.to(self.device) #TODO: should this model be set on a different id?
                 self.det_model.eval()
             except ImportError as err:
                 print("Import error for dection package:", err)
@@ -102,7 +104,7 @@ class RetinaGANModel(CycleGANModel):
             # define loss functions
             self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)  # define GAN loss.
             self.criterionCycle = torch.nn.L1Loss()
-            self.criterionIdt = torch.nn.L1Loss()
+            self.critertionPRCP = networks.PerceptionConsistencyLoss(opt.prcp_box_loss, opt.prcp_class_loss).to(self.device) #define PCL
             # initialize optimizers; schedulers will be automatically created by function <BaseModel.setup>.
             self.optimizer_G = torch.optim.Adam(itertools.chain(self.netG_A.parameters(), self.netG_B.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizer_D = torch.optim.Adam(itertools.chain(self.netD_A.parameters(), self.netD_B.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
@@ -124,10 +126,10 @@ class RetinaGANModel(CycleGANModel):
 
     def forward(self):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
-        self.fake_B = self.netG_A(self.real_A)  # G_A(A)
-        self.rec_A = self.netG_B(self.fake_B)   # G_B(G_A(A))
-        self.fake_A = self.netG_B(self.real_B)  # G_B(B)
-        self.rec_B = self.netG_A(self.fake_A)   # G_A(G_B(B))
+        self.fake_B = self.netG_A(self.real_A)  # G_A(A) = x'
+        self.rec_A = self.netG_B(self.fake_B)   # G_B(G_A(A)) = x"
+        self.fake_A = self.netG_B(self.real_B)  # G_B(B) = y'
+        self.rec_B = self.netG_A(self.fake_A)   # G_A(G_B(B)) = y"
 
     def backward_D_basic(self, netD, real, fake):
         """Calculate GAN loss for the discriminator
@@ -163,21 +165,12 @@ class RetinaGANModel(CycleGANModel):
 
     def backward_G(self):
         """Calculate the loss for generators G_A and G_B"""
-        lambda_idt = self.opt.lambda_identity
         lambda_A = self.opt.lambda_A
         lambda_B = self.opt.lambda_B
-        # Identity loss
-        if lambda_idt > 0:
-            # G_A should be identity if real_B is fed: ||G_A(B) - B||
-            self.idt_A = self.netG_A(self.real_B)
-            self.loss_idt_A = self.criterionIdt(self.idt_A, self.real_B) * lambda_B * lambda_idt
-            # G_B should be identity if real_A is fed: ||G_B(A) - A||
-            self.idt_B = self.netG_B(self.real_A)
-            self.loss_idt_B = self.criterionIdt(self.idt_B, self.real_A) * lambda_A * lambda_idt
-        else:
-            self.loss_idt_A = 0
-            self.loss_idt_B = 0
+        lambda_prcp = self.opt.lambda_prcp
 
+        # Perception Consistency loss (total)
+        self.loss_prcp = self.critertionPRCP()
         # GAN loss D_A(G_A(A))
         self.loss_G_A = self.criterionGAN(self.netD_A(self.fake_B), True)
         # GAN loss D_B(G_B(B))
@@ -187,7 +180,7 @@ class RetinaGANModel(CycleGANModel):
         # Backward cycle loss || G_A(G_B(B)) - B||
         self.loss_cycle_B = self.criterionCycle(self.rec_B, self.real_B) * lambda_B
         # combined loss and calculate gradients
-        self.loss_G = self.loss_G_A + self.loss_G_B + self.loss_cycle_A + self.loss_cycle_B + self.loss_idt_A + self.loss_idt_B
+        self.loss_G = self.loss_G_A + self.loss_G_B + self.loss_cycle_A + self.loss_cycle_B
         self.loss_G.backward()
 
     def optimize_parameters(self):
