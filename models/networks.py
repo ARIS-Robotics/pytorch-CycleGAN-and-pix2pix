@@ -330,7 +330,15 @@ class PerceptionConsistencyLoss(nn.Module):
         else:
             raise NotImplementedError('class_loss %s not implemented' % class_loss)
     
-    def __call__(self, box_x, box_g, class_x, class_g):
+    def format_input(self):
+        """format the output from mask-rcnn so that class labels are one-hot vectored"""
+        pass
+
+    def assign_objects(self, ground_truth, predicted):
+        """Similarly to how loss is calculated in Mask-RCNN, align the correct objects for comparison with each other"""
+        pass
+
+    def calc_object_loss(self, box_x, box_g, class_x, class_g):
         """
         Calculate loss given the original image and the new generated image
 
@@ -345,6 +353,19 @@ class PerceptionConsistencyLoss(nn.Module):
         """
         loss = self.box_loss(box_x, box_g) + self.class_loss(class_x, class_g)
         return loss
+ 
+    def __call__(self, box_x, box_g, class_x, class_g):
+        """
+        TODO: Modify __call__ to be the aggregate loss of all the individual object_loss
+        (1) format output of classes into one hot vectors
+        (2) assign predicted objects with ground truth object based on the IoU threshold
+        (3) for each assigned propsal
+        (4)     calculate the box loss
+        (5)     calculate the class loss
+        (6)     sum to get total loss
+        (7) return aggregate loss across assigned proposals
+        """
+        pass
 
 
 def cal_gradient_penalty(netD, real_data, fake_data, device, type='mixed', constant=1.0, lambda_gp=10.0):
