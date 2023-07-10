@@ -85,7 +85,7 @@ class RetinaGANModel(CycleGANModel):
             try:
                 from detection import MaskRCNN
                 self.det_model = MaskRCNN.load_from_checkpoint(self.opt.det_model_path)
-                self.det_model.to(self.device) #TODO: should this model be set on a different id?
+                self.det_model.to(self.device)
             except ImportError as err:
                 print("Import error for dection package:", err)
             except Exception as err:
