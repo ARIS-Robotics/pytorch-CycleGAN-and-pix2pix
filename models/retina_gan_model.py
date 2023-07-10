@@ -167,8 +167,13 @@ class RetinaGANModel(CycleGANModel):
         lambda_prcp = self.opt.lambda_prcp
 
         # Perception Consistency loss (total)
-        self.loss_prcp = self.critertionPRCP()
-        # GAN loss D_A(G_A(A))
+        self.loss_prcp = (self.critertionPRCP(self.real_A, self.fake_B) + \
+                         0.5*self.critertionPRCP(self.real_A, self.rec_A) + \
+                         0.5*self.critertionPRCP(self.fake_B, self.rec_A) + \
+                         self.critertionPRCP(self.real_B, self.fake_A) + \
+                         0.5*self.critertionPRCP(self.real_B, self.rec_B) + \
+                         0.5*self.critertionPRCP(self.fake_A, self.rec_B)) * lambda_prcp
+        # GAN loss D_A(G_A(A)) 
         self.loss_G_A = self.criterionGAN(self.netD_A(self.fake_B), True)
         # GAN loss D_B(G_B(B))
         self.loss_G_B = self.criterionGAN(self.netD_B(self.fake_A), True)
@@ -177,7 +182,7 @@ class RetinaGANModel(CycleGANModel):
         # Backward cycle loss || G_A(G_B(B)) - B||
         self.loss_cycle_B = self.criterionCycle(self.rec_B, self.real_B) * lambda_B
         # combined loss and calculate gradients
-        self.loss_G = self.loss_G_A + self.loss_G_B + self.loss_cycle_A + self.loss_cycle_B
+        self.loss_G = self.loss_G_A + self.loss_G_B + self.loss_cycle_A + self.loss_cycle_B + self.loss_prcp
         self.loss_G.backward()
 
     def optimize_parameters(self):
