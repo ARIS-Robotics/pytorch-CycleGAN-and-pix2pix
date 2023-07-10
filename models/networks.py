@@ -841,7 +841,7 @@ class RetinaGANDiscriminator(nn.Module):
                     nn.LeakyReLU(0.2, True),
                     
                     nn.Conv2d(256, 1, kernel_size=kw, stride=1, padding=padw),
-                    ] #NOTE: sigmoid activation handled in vannilla gan loss (BCEWithLogitsLoss)
+                    ] #NOTE: sigmoid activation handled in GANLoss
         self.model = nn.Sequential(*sequence)
 
     def forward(self, input):
