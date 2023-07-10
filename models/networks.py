@@ -4,6 +4,7 @@ from torch.nn import init
 import torch.nn.utils.spectral_norm as spectral_norm
 import functools
 from torch.optim import lr_scheduler
+import torchvision
 
 
 ###############################################################################
@@ -286,86 +287,73 @@ class GANLoss(nn.Module):
                 loss = prediction.mean()
         return loss
 
-class FCL(nn.Module):
-    """ Define Focal Consistency Loss (FCL) (https://arxiv.org/pdf/2011.03148.pdf)
-
-    FCL extends Focal Loss by supporting ground truth confidence probabilities [0,1] from binary {0,1} classification
-    """
-
-    def __init__(self):
-        """Initialize the FCL class
-        
-        Parameters:
-            
-        """
-
 
 class PerceptionConsistencyLoss(nn.Module):
     """Define Perception Consistency Loss for penalizing discrepencies in object detections between translations
     Source: https://arxiv.org/pdf/2011.03148.pdf
 
     Given two differently-stylized images of the same scene, this loss enforces invariance in the scene content
+
+    Requires a pre-trained MaskRCNN model
     """
 
-    def __init__(self, box_loss="huber", class_loss="BCE"):
+    def __init__(self, det_model):
         """
         Initialize Perception Consistency Loss class
 
         Parameters:
-            box_loss (str) -- the type of regression loss on the segmentation boxes. Supports 'huber'
-            class_loss (str) -- the type of classification loss on the class labels. Supports 'cross_entropy'
+            det_model (MaskRCNN from PyTorch or ARIS Detection) -- a pretrained object detection model
         """
         super(PerceptionConsistencyLoss, self).__init__()
-        if box_loss == "huber":
-            self.box_loss = nn.HuberLoss()
-        else:
-            raise NotImplementedError('box_loss %s not implemented' % box_loss)
-        
-        if class_loss == "cross_entropy":
-            self.class_loss = nn.CrossEntropyLoss()
-        elif class_loss == "BCE":
-            self.class_loss = nn.BCELoss()
-        elif class_loss == "FCL":
-            self.class_loss = FCL()
-        else:
-            raise NotImplementedError('class_loss %s not implemented' % class_loss)
-    
-    def format_input(self):
-        """format the output from mask-rcnn so that class labels are one-hot vectored"""
-        pass
+        self.det_model = det_model
 
-    def assign_objects(self, ground_truth, predicted):
-        """Similarly to how loss is calculated in Mask-RCNN, align the correct objects for comparison with each other"""
-        pass
-
-    def calc_object_loss(self, box_x, box_g, class_x, class_g):
+    def calc_model_loss(self, image_o, image_g):
         """
-        Calculate loss given the original image and the new generated image
+        Calculate MaskRCNN loss given the original image and the new generated image
 
         Parameters:
-            box_x (FloatTensor[N,4]) -- the original image's predicted bounding boxes
-            box_g (FloatTensor[N,4]) -- the generated image's predicted bounding boxes
-            class_x (Int64Tensor[N]) -- the original image's predicted labels
-            class_g (Int64Tensor[N]) -- the generated image's predicted labels
+            image_o (Tensor[N,C,H,W]) -- original image that produces target label
+            image_g (Tensor[N,C,H,W]) -- generated image
         
         Returns:
-            the calculated loss
+            loss_dict (Dict[str, torch.Tensor]) -- maps each loss type to loss value
         """
-        loss = self.box_loss(box_x, box_g) + self.class_loss(class_x, class_g)
-        return loss
+        with torch.no_grad():
+            # enerate target values from original image
+            self.det_model.eval()           
+            target = self.det_model(image_o)
+            
+            # Squeeze extra outputted dimension in the mask
+            masks = target[0]["masks"] 
+            target[0]["masks"] = torch.squeeze(masks, dim=1)
+            
+            # Put the model in train mode to enable loss return
+            self.det_model.train()
+            
+            # set bn layers to eval to avoid training behavior
+            for module in self.det_model.model.modules():
+                if isinstance(module, torchvision.ops.misc.FrozenBatchNorm2d):
+                    module.eval()
+
+            loss_dict = self.det_model(image_g, target)
+
+        return loss_dict
  
-    def __call__(self, box_x, box_g, class_x, class_g):
+    def __call__(self, image_o, image_g):
         """
-        TODO: Modify __call__ to be the aggregate loss of all the individual object_loss
-        (1) format output of classes into one hot vectors
-        (2) assign predicted objects with ground truth object based on the IoU threshold
-        (3) for each assigned propsal
-        (4)     calculate the box loss
-        (5)     calculate the class loss
-        (6)     sum to get total loss
-        (7) return aggregate loss across assigned proposals
+        Calculate Perception Consistency Loss given the original image and the new generated image
+
+        Parameters:
+            image_o (Tensor[N,C,H,W]) -- original image that produces target label
+            image_g (Tensor[N,C,H,W]) -- generated image
+        
+        Returns:
+            loss (Tensor) -- the sum of the box regression and class losses from detection model
         """
-        pass
+        
+        loss_dict = self.calc_model_loss(image_o, image_g)
+        box_loss, class_loss = loss_dict['loss_box_reg'], loss_dict["loss_classifier"]
+        return box_loss + class_loss
 
 
 def cal_gradient_penalty(netD, real_data, fake_data, device, type='mixed', constant=1.0, lambda_gp=10.0):
