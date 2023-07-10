@@ -42,8 +42,6 @@ class RetinaGANModel(CycleGANModel):
             parser.add_argument('--lambda_A', type=float, default=10.0, help='weight for cycle loss (A -> B -> A)')
             parser.add_argument('--lambda_B', type=float, default=10.0, help='weight for cycle loss (B -> A -> B)')
             parser.add_argument('--lambda_prcp', type=float, default=0.1, help='weight for perception consistency loss on the generators for object detection')
-            parser.add_argument('--prcp_box_loss', type=str, default='huber', help= 'regression loss on the segmentation boxes for Perception Consistency Loss')
-            parser.add_argument('--prcp_class_loss', type=str, default='BCE', help='classification loss on the class outputs for Perception Consistency Loss')
             parser.add_argument('--det_model', type=str, default='mask_rcnn', help='name of object detection model')
             parser.add_argument('--det_model_path', type=str, default='None', help='path to pre-trained object detection model')
         return parser
@@ -88,7 +86,6 @@ class RetinaGANModel(CycleGANModel):
                 from detection import MaskRCNN
                 self.det_model = MaskRCNN.load_from_checkpoint(self.opt.det_model_path)
                 self.det_model.to(self.device) #TODO: should this model be set on a different id?
-                self.det_model.eval()
             except ImportError as err:
                 print("Import error for dection package:", err)
             except Exception as err:
@@ -104,7 +101,7 @@ class RetinaGANModel(CycleGANModel):
             # define loss functions
             self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)  # define GAN loss.
             self.criterionCycle = torch.nn.L1Loss()
-            self.critertionPRCP = networks.PerceptionConsistencyLoss(opt.prcp_box_loss, opt.prcp_class_loss).to(self.device) #define PCL
+            self.critertionPRCP = networks.PerceptionConsistencyLoss(self.det_model).to(self.device) #define PCL
             # initialize optimizers; schedulers will be automatically created by function <BaseModel.setup>.
             self.optimizer_G = torch.optim.Adam(itertools.chain(self.netG_A.parameters(), self.netG_B.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizer_D = torch.optim.Adam(itertools.chain(self.netD_A.parameters(), self.netD_B.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
