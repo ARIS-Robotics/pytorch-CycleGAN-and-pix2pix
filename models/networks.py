@@ -319,7 +319,7 @@ class PerceptionConsistencyLoss(nn.Module):
             loss_dict (Dict[str, torch.Tensor]) -- maps each loss type to loss value
         """
         with torch.no_grad():
-            # enerate target values from original image
+            # generate target values from original image
             self.det_model.eval()           
             target = self.det_model(image_o)
             
